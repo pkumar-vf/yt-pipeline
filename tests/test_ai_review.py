@@ -4,17 +4,21 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+import httpx
 from pydantic import ValidationError
 
 from yt_pipeline.config import Settings
 from yt_pipeline.models import AIReviewResult
 from yt_pipeline.stages.ai_review import (
+    OllamaClient,
     RankingService,
     TranscriptWindowExtractor,
     duplicate_analysis,
     overlap_ratio,
     parse_ollama_review_response,
+    raise_for_ollama_status,
     representative_timestamps,
     weighted_score,
 )
@@ -82,6 +86,78 @@ class AIReviewModelTests(unittest.TestCase):
         payload = {"message": {"content": json.dumps(valid_ai_payload())}}
 
         self.assertEqual(parse_ollama_review_response(payload).recommendation, "UPLOAD")
+
+
+class FakeAsyncClient:
+    """Async HTTP client fake used by Ollama client tests."""
+
+    calls: list[str] = []
+    payloads: list[dict] = []
+
+    def __init__(self, timeout: int) -> None:
+        """Accept the same timeout argument as httpx.AsyncClient."""
+
+        self.timeout = timeout
+
+    async def __aenter__(self) -> "FakeAsyncClient":
+        """Return this fake client from the async context manager."""
+
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        """Exit the fake async context manager."""
+
+    async def post(self, url: str, json: dict) -> httpx.Response:
+        """Return a chat failure followed by a generate success."""
+
+        self.calls.append(url)
+        self.payloads.append(json)
+        if url.endswith("/api/chat"):
+            return httpx.Response(400, json={"error": "chat unsupported"}, request=httpx.Request("POST", url))
+        return httpx.Response(
+            200,
+            json={"response": __import__("json").dumps(valid_ai_payload())},
+            request=httpx.Request("POST", url),
+        )
+
+
+class OllamaClientTests(unittest.IsolatedAsyncioTestCase):
+    """Tests for Ollama API fallback and error reporting."""
+
+    async def test_chat_400_falls_back_to_generate(self) -> None:
+        """Ollama client falls back to generate when chat rejects image requests."""
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            image = Path(temp_dir) / "frame.jpg"
+            image.write_bytes(b"fake image")
+            FakeAsyncClient.calls = []
+            FakeAsyncClient.payloads = []
+            client = OllamaClient(
+                base_url="http://ollama.test",
+                model="qwen3-vl:8b",
+                timeout_seconds=1,
+                max_retries=0,
+                num_ctx=8192,
+            )
+
+            with patch("yt_pipeline.stages.ai_review.httpx.AsyncClient", FakeAsyncClient):
+                result = await client.review(prompt="review", image_paths=[image])
+
+            self.assertEqual(result.recommendation, "UPLOAD")
+            self.assertEqual(FakeAsyncClient.calls, ["http://ollama.test/api/chat", "http://ollama.test/api/generate"])
+            self.assertEqual(FakeAsyncClient.payloads[-1]["options"]["num_ctx"], 8192)
+
+    async def test_ollama_status_error_includes_body(self) -> None:
+        """Raised Ollama HTTP errors include the server response body."""
+
+        response = httpx.Response(
+            400,
+            text='{"error":"bad schema"}',
+            request=httpx.Request("POST", "http://ollama.test/api/chat"),
+        )
+
+        with self.assertRaisesRegex(httpx.HTTPStatusError, "bad schema"):
+            raise_for_ollama_status(response)
 
 
 class ReviewHelperTests(unittest.TestCase):

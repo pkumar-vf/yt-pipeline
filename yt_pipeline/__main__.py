@@ -26,6 +26,9 @@ def main() -> None:
     review_video.add_argument("video_id")
     review_video.add_argument("--force", action="store_true")
     review_video.add_argument("--limit", type=int)
+    review_pending = subparsers.add_parser("review-pending")
+    review_pending.add_argument("--force", action="store_true")
+    review_pending.add_argument("--limit", type=int)
     review_reel = subparsers.add_parser("review-reel")
     review_reel.add_argument("reel_id")
     review_reel.add_argument("--force", action="store_true")
@@ -54,6 +57,9 @@ def main() -> None:
     elif args.command == "review-video":
         result = asyncio.run(AIReviewService(repo, settings).review_video(args.video_id, force=args.force, limit=args.limit))
         print_review_summary(result)
+    elif args.command == "review-pending":
+        result = asyncio.run(AIReviewService(repo, settings).review_pending(force=args.force, limit=args.limit))
+        print_review_summary(result)
     elif args.command == "review-reel":
         video, _reel = repo.find_reel(args.reel_id)
         result = asyncio.run(AIReviewService(repo, settings).review_reel(video.video_id, args.reel_id, force=args.force))
@@ -76,6 +82,8 @@ def main() -> None:
 def print_review_summary(result: dict) -> None:
     """Print a concise review-video command summary."""
 
+    if "videos" in result:
+        print(f"Videos: {result.get('videos', 0)}")
     print(f"Reviewed: {result.get('reviewed', 0)}")
     print(f"Failed: {result.get('failed', 0)}")
     print(f"Ranked: {result.get('ranked', 0)}")

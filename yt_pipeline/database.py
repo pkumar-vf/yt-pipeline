@@ -59,6 +59,15 @@ class VideoRepository:
         )
         return [VideoDocument.model_validate(doc) for doc in docs]
 
+    def list_videos_with_pending_ai_review(self, *, limit: int = 100) -> list[VideoDocument]:
+        """Return videos that have generated reels with missing or failed AI review."""
+
+        docs: Iterable[dict[str, Any]] = (
+            self.collection.find({"stages.reels.completed": True}).sort("updatedAt", DESCENDING).limit(limit)
+        )
+        videos = [VideoDocument.model_validate(doc) for doc in docs]
+        return [video for video in videos if has_pending_reels(video)]
+
     def set_status(self, video_id: str, status: VideoStatus) -> None:
         """Update only the high-level status for a video."""
 
@@ -258,6 +267,14 @@ def deep_merge(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
         else:
             base[key] = value
     return base
+
+
+def has_pending_reels(video: VideoDocument) -> bool:
+    """Return whether a video has at least one reel that still needs AI review."""
+
+    stage = video.stages.get(StageName.REELS.value)
+    reels = stage.metadata.get("clips", []) if stage else []
+    return any((reel.get("aiReview") or {}).get("status") != "COMPLETED" for reel in reels)
 
 
 def build_repository(mongo_uri: str, database: str, collection: str) -> VideoRepository:

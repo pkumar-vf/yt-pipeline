@@ -277,13 +277,23 @@ class ActivityMetricCalculator:
 class OllamaClient:
     """Async client for schema-constrained local Ollama review calls."""
 
-    def __init__(self, *, base_url: str, model: str, timeout_seconds: int, max_retries: int, logger: logging.Logger = LOGGER) -> None:
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        model: str,
+        timeout_seconds: int,
+        max_retries: int,
+        num_ctx: int = 8192,
+        logger: logging.Logger = LOGGER,
+    ) -> None:
         """Create an Ollama client from runtime settings."""
 
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
+        self.num_ctx = num_ctx
         self.logger = logger
 
     async def health(self) -> dict[str, Any]:
@@ -313,12 +323,25 @@ class OllamaClient:
                         {"role": "user", "content": content, "images": images},
                     ],
                     "format": AIReviewResult.model_json_schema(by_alias=True),
-                    "options": {"temperature": 0.1},
+                    "options": {"temperature": 0.1, "num_ctx": self.num_ctx},
                     "stream": False,
                 }
                 async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
                     response = await client.post(f"{self.base_url}/api/chat", json=payload)
-                    response.raise_for_status()
+                    if response.status_code in {400, 404}:
+                        response = await client.post(
+                            f"{self.base_url}/api/generate",
+                            json={
+                                "model": self.model,
+                                "system": SYSTEM_PROMPT,
+                                "prompt": content,
+                                "images": images,
+                                "format": AIReviewResult.model_json_schema(by_alias=True),
+                                "options": {"temperature": 0.1, "num_ctx": self.num_ctx},
+                                "stream": False,
+                            },
+                        )
+                    raise_for_ollama_status(response)
                 self.logger.info("Ollama inference completed in %.2fs", time.monotonic() - started)
                 return parse_ollama_review_response(response.json())
             except (httpx.TimeoutException, httpx.TransportError, httpx.HTTPStatusError, ValidationError, json.JSONDecodeError) as exc:
@@ -347,6 +370,7 @@ class AIReviewService:
             model=settings.ollama_model,
             timeout_seconds=settings.ollama_timeout_seconds,
             max_retries=settings.ollama_max_retries,
+            num_ctx=settings.ollama_num_ctx,
             logger=logger,
         )
         self.semaphore = asyncio.Semaphore(max(1, settings.ai_review_concurrency))
@@ -428,6 +452,35 @@ class AIReviewService:
         ranking = RankingService(self.repo, self.settings).rank_video(video_id)
         return {"reviewed": reviewed, "failed": failed, **ranking}
 
+    async def review_pending(self, *, force: bool = False, limit: int | None = None) -> dict[str, Any]:
+        """Review pending reels across all videos with generated reel candidates."""
+
+        total_reviewed = 0
+        total_failed = 0
+        total_ranked = 0
+        processed_videos = 0
+        top_reels: list[str] = []
+        remaining = limit
+        for video in self.repo.list_videos_with_pending_ai_review():
+            if remaining is not None and remaining <= 0:
+                break
+            result = await self.review_video(video.video_id, force=force, limit=remaining)
+            processed_videos += 1
+            total_reviewed += int(result.get("reviewed", 0))
+            total_failed += int(result.get("failed", 0))
+            total_ranked += int(result.get("ranked", 0))
+            if result.get("topReel"):
+                top_reels.append(str(result["topReel"]))
+            if remaining is not None:
+                remaining -= int(result.get("reviewed", 0)) + int(result.get("failed", 0))
+        return {
+            "videos": processed_videos,
+            "reviewed": total_reviewed,
+            "failed": total_failed,
+            "ranked": total_ranked,
+            "topReel": top_reels[0] if top_reels else None,
+        }
+
 
 class RankingService:
     """Deterministically rank successfully reviewed reels for a source video."""
@@ -493,6 +546,20 @@ def parse_ollama_review_response(payload: dict[str, Any]) -> AIReviewResult:
 
     content = ((payload.get("message") or {}).get("content") or payload.get("response") or "").strip()
     return AIReviewResult.model_validate_json(content)
+
+
+def raise_for_ollama_status(response: httpx.Response) -> None:
+    """Raise an HTTP error that includes Ollama's response body."""
+
+    try:
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        body = response.text.strip()
+        raise httpx.HTTPStatusError(
+            f"{exc}; Ollama response body: {body}",
+            request=exc.request,
+            response=exc.response,
+        ) from exc
 
 
 def representative_timestamps(duration: float, count: int) -> list[float]:

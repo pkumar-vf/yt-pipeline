@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     ollama_model: str = Field(default="qwen3-vl:8b", alias="OLLAMA_MODEL")
     ollama_timeout_seconds: int = Field(default=180, alias="OLLAMA_TIMEOUT_SECONDS")
     ollama_max_retries: int = Field(default=2, alias="OLLAMA_MAX_RETRIES")
+    ollama_num_ctx: int = Field(default=8192, alias="OLLAMA_NUM_CTX")
     ai_review_enabled: bool = Field(default=True, alias="AI_REVIEW_ENABLED")
     ai_review_concurrency: int = Field(default=1, alias="AI_REVIEW_CONCURRENCY")
     ai_review_frame_count: int = Field(default=8, alias="AI_REVIEW_FRAME_COUNT")

@@ -81,6 +81,7 @@ export OLLAMA_BASE_URL="http://localhost:11434"
 export OLLAMA_MODEL="qwen3-vl:8b"
 export OLLAMA_TIMEOUT_SECONDS=180
 export OLLAMA_MAX_RETRIES=2
+export OLLAMA_NUM_CTX=8192
 export AI_REVIEW_ENABLED=true
 ```
 
@@ -88,6 +89,8 @@ Review and rank generated reels:
 
 ```bash
 yt-pipeline review-video <videoId>
+yt-pipeline review-pending
+yt-pipeline review-pending --limit 5
 yt-pipeline review-video <videoId> --force --limit 5
 yt-pipeline review-reel <reelId> --force
 yt-pipeline rank-video <videoId>
