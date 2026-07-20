@@ -1,0 +1,22 @@
+[project]
+name = "yt-pipeline"
+version = "0.1.0"
+description = "Small YouTube processing pipeline with MongoDB state and a stage UI."
+requires-python = ">=3.12"
+dependencies = [
+  "apscheduler>=3.10",
+  "fastapi>=0.111",
+  "faster-whisper>=1.0",
+  "pydantic>=2.7",
+  "pydantic-settings>=2.2",
+  "pymongo>=4.7",
+  "uvicorn>=0.30",
+  "yt-dlp>=2024.7.1",
+]
+
+[project.scripts]
+yt-pipeline = "yt_pipeline.__main__:main"
+
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
