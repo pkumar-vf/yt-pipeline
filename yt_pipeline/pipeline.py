@@ -1,10 +1,13 @@
 """Pipeline orchestration for discovery, download, and processing stages."""
 
+import asyncio
+import logging
+
 from yt_pipeline.config import Settings
 from yt_pipeline.database import VideoRepository
 from yt_pipeline.downloader import YouTubeDownloader
 from yt_pipeline.models import StageName, VideoDocument, VideoStatus
-from yt_pipeline.stages.ai_review import review_reels
+from yt_pipeline.stages.ai_review import AIReviewService
 from yt_pipeline.stages.reels import generate_reels
 from yt_pipeline.stages.transcription import TranscriptionStage
 from yt_pipeline.stages.uploader import upload_ready_reels
@@ -13,6 +16,8 @@ from yt_pipeline.stages.uploader import upload_ready_reels
 class VideoPipeline:
     """Coordinates each pipeline step while persistence stays in the repository."""
 
+    logger = logging.getLogger(__name__)
+
     def __init__(self, settings: Settings, repo: VideoRepository, downloader: YouTubeDownloader) -> None:
         """Create a pipeline from settings and its external dependencies."""
 
@@ -20,6 +25,7 @@ class VideoPipeline:
         self.repo = repo
         self.downloader = downloader
         self.transcription_stage = TranscriptionStage(repo, settings.transcripts_dir)
+        self.ai_review_service = AIReviewService(repo, settings)
 
     def discover_and_download(self, *, limit: int = 10) -> int:
         """Discover channel videos, download new ones, and store stage state."""
@@ -74,7 +80,6 @@ class VideoPipeline:
             VideoStatus.DOWNLOADED,
             VideoStatus.TRANSCRIBED,
             VideoStatus.REELS_GENERATED,
-            VideoStatus.AI_REVIEWED,
         ]
         for video in self.repo.list_by_status(statuses, limit=100):
             if video.status == VideoStatus.DOWNLOADED:
@@ -86,14 +91,13 @@ class VideoPipeline:
             elif video.status == VideoStatus.REELS_GENERATED:
                 self._review(video)
                 progressed += 1
-            elif video.status == VideoStatus.AI_REVIEWED:
-                self.repo.set_status(video.video_id, VideoStatus.READY_FOR_UPLOAD)
-                progressed += 1
         return progressed
 
     def upload_ready(self) -> None:
         """Upload videos that have passed all pre-upload stages."""
 
+        # Upload is intentionally manual-gated in the AI review phase.
+        return
         for video in self.repo.list_recent(limit=100):
             if video.status != VideoStatus.READY_FOR_UPLOAD:
                 continue
@@ -160,13 +164,21 @@ class VideoPipeline:
     def _review(self, video: VideoDocument) -> None:
         """Run AI review for generated reels."""
 
-        try:
-            review = review_reels(video)
-            self.repo.complete_stage(
+        if not self.settings.ai_review_enabled:
+            self.logger.warning("AI review disabled for video_id=%s", video.video_id)
+            self.repo.update_ai_review_stage(
                 video.video_id,
-                StageName.AI_REVIEW,
-                status=VideoStatus.AI_REVIEWED,
-                metadata=review,
+                {"status": "PENDING", "completed": False, "model": self.settings.ollama_model, "error": "AI review disabled."},
             )
+            self.repo.set_status(video.video_id, VideoStatus.AI_REVIEWED)
+            return
+        try:
+            asyncio.run(self.ai_review_service.review_video(video.video_id))
+            self.repo.set_status(video.video_id, VideoStatus.AI_REVIEWED)
         except Exception as exc:
-            self.repo.fail_stage(video.video_id, StageName.AI_REVIEW, str(exc))
+            self.logger.warning("AI review pending for video_id=%s: %s", video.video_id, exc)
+            self.repo.update_ai_review_stage(
+                video.video_id,
+                {"status": "PENDING", "completed": False, "model": self.settings.ollama_model, "error": str(exc)},
+            )
+            self.repo.set_status(video.video_id, VideoStatus.AI_REVIEWED)

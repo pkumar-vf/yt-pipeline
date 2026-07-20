@@ -54,3 +54,49 @@ yt-pipeline ui
 ```
 
 Then open `http://127.0.0.1:8000`.
+
+## Local AI Review
+
+AI review runs locally through Ollama. The model output is advisory only:
+manual approval remains mandatory and no clip is automatically uploaded.
+
+Install and start Ollama:
+
+```bash
+brew install ollama
+ollama serve
+```
+
+Download and verify the default local model:
+
+```bash
+ollama pull qwen3-vl:8b
+ollama run qwen3-vl:8b
+```
+
+Configure AI review:
+
+```bash
+export OLLAMA_BASE_URL="http://localhost:11434"
+export OLLAMA_MODEL="qwen3-vl:8b"
+export OLLAMA_TIMEOUT_SECONDS=180
+export OLLAMA_MAX_RETRIES=2
+export AI_REVIEW_ENABLED=true
+```
+
+Review and rank generated reels:
+
+```bash
+yt-pipeline review-video <videoId>
+yt-pipeline review-video <videoId> --force --limit 5
+yt-pipeline review-reel <reelId> --force
+yt-pipeline rank-video <videoId>
+yt-pipeline retry-ai-review <reelId>
+yt-pipeline build-review-assets <reelId> --force
+yt-pipeline ai-health
+```
+
+Review proxies and frames are stored under `review-assets/`. Original
+1080x1920 reel files remain unchanged and are still the upload candidates.
+The review model receives representative frames, transcript windows, and
+activity metrics through the local Ollama instance.

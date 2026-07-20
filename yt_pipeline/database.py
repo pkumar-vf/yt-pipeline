@@ -6,7 +6,7 @@ from typing import Any
 from pymongo import ASCENDING, DESCENDING, MongoClient
 from pymongo.collection import Collection
 
-from yt_pipeline.models import StageName, StageState, VideoDocument, VideoStatus, utc_now
+from yt_pipeline.models import HumanReviewUpdateDTO, StageName, StageState, VideoDocument, VideoStatus, utc_now
 
 
 class VideoRepository:
@@ -159,6 +159,105 @@ class VideoRepository:
                 }
             },
         )
+
+    def get_reel(self, video_id: str, reel_id: str) -> tuple[VideoDocument, dict[str, Any]]:
+        """Return a video and one reel metadata record by ids."""
+
+        video = self.get(video_id)
+        if not video:
+            raise ValueError(f"Video not found: {video_id}")
+        stage = video.stages.get(StageName.REELS.value)
+        reels = stage.metadata.get("clips", []) if stage else []
+        for reel in reels:
+            if reel.get("id") == reel_id:
+                return video, reel
+        raise ValueError(f"Reel not found: {reel_id}")
+
+    def find_reel(self, reel_id: str) -> tuple[VideoDocument, dict[str, Any]]:
+        """Find a reel by id across videos."""
+
+        data = self.collection.find_one({"stages.reels.metadata.clips.id": reel_id})
+        if not data:
+            raise ValueError(f"Reel not found: {reel_id}")
+        video = VideoDocument.model_validate(data)
+        stage = video.stages.get(StageName.REELS.value)
+        for reel in stage.metadata.get("clips", []) if stage else []:
+            if reel.get("id") == reel_id:
+                return video, reel
+        raise ValueError(f"Reel not found: {reel_id}")
+
+    def list_reels(self, video_id: str) -> list[dict[str, Any]]:
+        """Return all reel records for a video."""
+
+        video = self.get(video_id)
+        if not video:
+            raise ValueError(f"Video not found: {video_id}")
+        stage = video.stages.get(StageName.REELS.value)
+        return list(stage.metadata.get("clips", []) if stage else [])
+
+    def update_reel(self, video_id: str, reel_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+        """Merge a patch into one reel record and persist the clips list."""
+
+        video = self.get(video_id)
+        if not video:
+            raise ValueError(f"Video not found: {video_id}")
+        stage = video.stages.get(StageName.REELS.value)
+        reels = list(stage.metadata.get("clips", []) if stage else [])
+        updated: dict[str, Any] | None = None
+        for index, reel in enumerate(reels):
+            if reel.get("id") == reel_id:
+                updated = deep_merge(dict(reel), patch)
+                reels[index] = updated
+                break
+        if updated is None:
+            raise ValueError(f"Reel not found: {reel_id}")
+        self.update_reels_metadata(video_id, {"clips": reels})
+        return updated
+
+    def update_reels_metadata(self, video_id: str, metadata_patch: dict[str, Any]) -> None:
+        """Merge a patch into the reels stage metadata."""
+
+        video = self.get(video_id)
+        if not video:
+            raise ValueError(f"Video not found: {video_id}")
+        stage = video.stages.get(StageName.REELS.value)
+        metadata = dict(stage.metadata if stage else {})
+        metadata.update(metadata_patch)
+        self.collection.update_one(
+            {"videoId": video_id},
+            {"$set": {"stages.reels.metadata": metadata, "updatedAt": utc_now()}},
+        )
+
+    def update_ai_review_stage(self, video_id: str, summary: dict[str, Any]) -> None:
+        """Persist the video-level AI review stage summary."""
+
+        self.collection.update_one(
+            {"videoId": video_id},
+            {"$set": {"stages.aiReview": summary, "updatedAt": utc_now()}},
+        )
+
+    def update_human_review(self, reel_id: str, update: HumanReviewUpdateDTO) -> dict[str, Any]:
+        """Persist a human review decision for one reel."""
+
+        video, _reel = self.find_reel(reel_id)
+        patch = {
+            "humanReview": {
+                **update.model_dump(by_alias=True, mode="json", exclude_none=True),
+                "reviewedAt": utc_now().isoformat(),
+            }
+        }
+        return self.update_reel(video.video_id, reel_id, patch)
+
+
+def deep_merge(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
+    """Recursively merge dictionaries while replacing non-dictionary values."""
+
+    for key, value in patch.items():
+        if isinstance(value, dict) and isinstance(base.get(key), dict):
+            base[key] = deep_merge(dict(base[key]), value)
+        else:
+            base[key] = value
+    return base
 
 
 def build_repository(mongo_uri: str, database: str, collection: str) -> VideoRepository:

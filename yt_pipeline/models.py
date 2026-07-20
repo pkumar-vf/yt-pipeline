@@ -2,10 +2,11 @@
 
 from datetime import datetime, timezone
 from enum import StrEnum
+from typing import Literal
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 def utc_now() -> datetime:
@@ -26,6 +27,32 @@ class VideoStatus(StrEnum):
     READY_FOR_UPLOAD = "READY_FOR_UPLOAD"
     UPLOADED = "UPLOADED"
     FAILED = "FAILED"
+
+
+class AIRecommendation(StrEnum):
+    """Allowed AI recommendations for a generated reel."""
+
+    UPLOAD = "UPLOAD"
+    REVIEW = "REVIEW"
+    SKIP = "SKIP"
+
+
+class AIReviewStatus(StrEnum):
+    """Per-reel AI review lifecycle state."""
+
+    PENDING = "PENDING"
+    PROCESSING = "PROCESSING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+
+
+class HumanReviewStatus(StrEnum):
+    """Manual review state required before upload."""
+
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+    NEEDS_EDIT = "NEEDS_EDIT"
 
 
 class StageName(StrEnum):
@@ -165,5 +192,63 @@ class ReelGenerationResultDTO(BaseModel):
     clips: list[ReelClipDTO]
     total_generated: int = Field(alias="totalGenerated")
     clip_seconds: int = Field(alias="clipSeconds")
+
+    model_config = {"populate_by_name": True}
+
+
+class AIScoreBreakdown(BaseModel):
+    """Strict score breakdown returned by the local review model."""
+
+    hook: float = Field(ge=0, le=10)
+    gameplay: float = Field(ge=0, le=10)
+    excitement: float = Field(ge=0, le=10)
+    visual_clarity: float = Field(alias="visualClarity", ge=0, le=10)
+    context_independence: float = Field(alias="contextIndependence", ge=0, le=10)
+    payoff: float = Field(ge=0, le=10)
+    pacing: float = Field(ge=0, le=10)
+    audio_clarity: float = Field(alias="audioClarity", ge=0, le=10)
+    technical_quality: float = Field(alias="technicalQuality", ge=0, le=10)
+    upload_potential: float = Field(alias="uploadPotential", ge=0, le=10)
+
+    model_config = {"populate_by_name": True}
+
+
+class AIReviewResult(BaseModel):
+    """Validated local model review result for one reel candidate."""
+
+    scores: AIScoreBreakdown
+    recommendation: Literal["UPLOAD", "REVIEW", "SKIP"]
+    confidence: float = Field(ge=0, le=1)
+    reason: str = Field(max_length=240)
+    detected_moment: str | None = Field(default=None, alias="detectedMoment", max_length=120)
+    suggested_title: str = Field(alias="suggestedTitle", max_length=80)
+    suggested_caption: str = Field(alias="suggestedCaption", max_length=300)
+    hashtags: list[str] = Field(default_factory=list, max_length=10)
+    issues: list[str] = Field(default_factory=list)
+
+    model_config = {"populate_by_name": True}
+
+    @field_validator("hashtags")
+    @classmethod
+    def normalize_hashtags(cls, value: list[str]) -> list[str]:
+        """Ensure hashtags are concise and consistently prefixed."""
+
+        normalized = []
+        for item in value:
+            tag = item.strip()
+            if not tag:
+                continue
+            normalized.append(tag if tag.startswith("#") else f"#{tag}")
+        return normalized[:10]
+
+
+class HumanReviewUpdateDTO(BaseModel):
+    """Request body for manual reel review decisions."""
+
+    status: HumanReviewStatus
+    notes: str | None = Field(default=None, max_length=1000)
+    edited_title: str | None = Field(default=None, alias="editedTitle", max_length=80)
+    edited_caption: str | None = Field(default=None, alias="editedCaption", max_length=300)
+    edited_hashtags: list[str] | None = Field(default=None, alias="editedHashtags", max_length=10)
 
     model_config = {"populate_by_name": True}
