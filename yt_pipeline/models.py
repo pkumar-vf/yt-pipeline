@@ -141,3 +141,27 @@ class TranscriptionResultDTO(BaseModel):
     duration: float
     total_segments: int
     model: str
+
+
+class ReelClipDTO(BaseModel):
+    """One generated vertical reel candidate."""
+
+    id: str
+    path: Path
+    start: float
+    end: float
+    duration: float
+    width: int = 1080
+    height: int = 1920
+    score: float | None = None
+    rank: int | None = None
+
+
+class ReelGenerationResultDTO(BaseModel):
+    """Result returned after generating vertical reel candidates."""
+
+    clips: list[ReelClipDTO]
+    total_generated: int = Field(alias="totalGenerated")
+    clip_seconds: int = Field(alias="clipSeconds")
+
+    model_config = {"populate_by_name": True}

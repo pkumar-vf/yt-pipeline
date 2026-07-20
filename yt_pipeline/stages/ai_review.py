@@ -4,9 +4,8 @@ from yt_pipeline.models import VideoDocument
 
 
 def review_reels(video: VideoDocument) -> dict[str, int]:
-    """Return a minimal review summary for generated reels."""
+    """Return a minimal review summary for generated reels awaiting model scoring."""
 
     generated = video.stages.get("reels")
     total = int(generated.metadata.get("totalGenerated", 0)) if generated else 0
-    return {"reviewed": total, "approved": total, "rejected": 0}
-
+    return {"reviewed": 0, "approved": 0, "rejected": 0, "pendingRanking": total}

@@ -124,16 +124,33 @@ class VideoPipeline:
         """Run reel generation for a transcribed video."""
 
         try:
-            clips = generate_reels(video, self.settings.reels_dir)
+            result = generate_reels(
+                video,
+                self.settings.reels_dir,
+                clip_seconds=self.settings.reel_clip_seconds,
+                max_clips=self.settings.reel_max_clips,
+            )
             self.repo.complete_stage(
                 video.video_id,
                 StageName.REELS,
                 status=VideoStatus.REELS_GENERATED,
                 metadata={
-                    "minLength": 15,
-                    "maxLength": 30,
-                    "totalGenerated": len(clips),
-                    "clips": [str(path) for path in clips],
+                    "width": 1080,
+                    "height": 1920,
+                    "aspectRatio": "9:16",
+                    "clipSeconds": result.clip_seconds,
+                    "totalGenerated": result.total_generated,
+                    "clips": [clip.model_dump(mode="json") for clip in result.clips],
+                    "ranking": [
+                        {
+                            "clipId": clip.id,
+                            "clipPath": str(clip.path),
+                            "score": None,
+                            "rank": None,
+                            "reviewStatus": "pending",
+                        }
+                        for clip in result.clips
+                    ],
                 },
             )
         except Exception as exc:

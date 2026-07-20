@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     downloads_dir: Path = Field(default=Path("downloads"), alias="DOWNLOADS_DIR")
     reels_dir: Path = Field(default=Path("reels"), alias="REELS_DIR")
     transcripts_dir: Path = Field(default=Path("transcripts"), alias="TRANSCRIPTS_DIR")
+    reel_clip_seconds: int = Field(default=30, alias="REEL_CLIP_SECONDS")
+    reel_max_clips: int = Field(default=20, alias="REEL_MAX_CLIPS")
     scheduler_minutes: int = Field(default=60, alias="SCHEDULER_MINUTES")
     ui_host: str = Field(default="127.0.0.1", alias="UI_HOST")
     ui_port: int = Field(default=8000, alias="UI_PORT")
