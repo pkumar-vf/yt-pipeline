@@ -8,7 +8,7 @@ tracking processing stages, and viewing stage state in a browser.
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e .
+pip install .
 ```
 
 Set the channel URL and MongoDB details:

@@ -8,6 +8,8 @@ import yt_dlp
 
 from yt_pipeline.models import DiscoveredVideoDTO, DownloadedVideoDTO
 
+BEST_AVAILABLE_FORMAT = "bv*+ba/b"
+
 
 class YouTubeDownloader:
     """Thin wrapper around yt-dlp for channel discovery and video downloads."""
@@ -32,11 +34,16 @@ class YouTubeDownloader:
 
         self.downloads_dir.mkdir(parents=True, exist_ok=True)
         output_template = str(self.downloads_dir / "%(id)s.%(ext)s")
-        options = {"outtmpl": output_template, "quiet": True, "format": "mp4/best"}
+        options = {
+            "outtmpl": output_template,
+            "quiet": True,
+            "format": BEST_AVAILABLE_FORMAT,
+            "merge_output_format": "mp4",
+        }
 
         with yt_dlp.YoutubeDL(options) as ydl:
             info = ydl.extract_info(video.webpage_url, download=True)
-            path = Path(ydl.prepare_filename(info))
+            path = self._downloaded_path(ydl, info)
 
         return DownloadedVideoDTO(
             video_id=video.video_id,
@@ -44,6 +51,18 @@ class YouTubeDownloader:
             local_path=path,
             metadata=self._metadata(info),
         )
+
+    def _downloaded_path(self, ydl: yt_dlp.YoutubeDL, info: dict[str, Any]) -> Path:
+        """Return the final output path after yt-dlp downloads and merges streams."""
+
+        requested_downloads = info.get("requested_downloads") or []
+        if requested_downloads and requested_downloads[0].get("filepath"):
+            return Path(requested_downloads[0]["filepath"])
+
+        path = Path(ydl.prepare_filename(info))
+        if info.get("requested_formats") and path.suffix != ".mp4":
+            return path.with_suffix(".mp4")
+        return path
 
     def _to_discovered(self, entry: dict[str, Any]) -> DiscoveredVideoDTO:
         """Map one yt-dlp channel entry into a validated DTO."""
@@ -69,4 +88,3 @@ class YouTubeDownloader:
         if not value:
             return None
         return datetime.strptime(value, "%Y%m%d").replace(tzinfo=timezone.utc)
-

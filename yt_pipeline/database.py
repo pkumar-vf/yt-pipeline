@@ -123,8 +123,7 @@ class VideoRepository:
                         "model": model,
                     },
                     "updatedAt": now,
-                },
-                "$unset": {"stages.transcription.error": ""},
+                }
             },
         )
 
