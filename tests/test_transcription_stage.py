@@ -143,12 +143,20 @@ class TranscriptionStageTests(unittest.TestCase):
             self.assertIn("00:00:01,250 --> 00:00:02,500", srt_path.read_text(encoding="utf-8"))
 
     def test_process_updates_mongo_after_transcription(self) -> None:
-        """Stage transcribes valid videos and writes Mongo update fields."""
+        """Stage transcribes audio for valid videos and writes Mongo update fields."""
 
         with tempfile.TemporaryDirectory() as temp_dir:
             video_path = Path(temp_dir) / "video.mp4"
+            audio_path = Path(temp_dir) / "audio.m4a"
             video_path.write_bytes(b"fake")
-            video = VideoDocument(videoId="abc", title="A", localPath=str(video_path), status=VideoStatus.DOWNLOADED)
+            audio_path.write_bytes(b"fake audio")
+            video = VideoDocument(
+                videoId="abc",
+                title="A",
+                localPath=str(video_path),
+                audioPath=str(audio_path),
+                status=VideoStatus.DOWNLOADED,
+            )
             video.stages[StageName.DOWNLOAD.value] = StageState(completed=True)
             repo = FakeRepository(video)
             FakeProvider.model = FakeModel(
@@ -168,8 +176,26 @@ class TranscriptionStageTests(unittest.TestCase):
             self.assertTrue(Path(repo.completed["transcript_path"]).exists())
             self.assertTrue(Path(repo.completed["subtitle_path"]).exists())
             self.assertEqual(FakeProvider.model.calls[0]["beam_size"], 5)
+            self.assertEqual(FakeProvider.model.calls[0]["audio"], str(audio_path))
             self.assertTrue(FakeProvider.model.calls[0]["word_timestamps"])
             self.assertTrue(FakeProvider.model.calls[0]["vad_filter"])
+
+    def test_process_falls_back_to_video_for_older_documents(self) -> None:
+        """Stage can transcribe older documents that do not have audioPath."""
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            video_path = Path(temp_dir) / "video.mp4"
+            video_path.write_bytes(b"fake")
+            video = VideoDocument(videoId="abc", title="A", localPath=str(video_path), status=VideoStatus.DOWNLOADED)
+            video.stages[StageName.DOWNLOAD.value] = StageState(completed=True)
+            repo = FakeRepository(video)
+            FakeProvider.model = FakeModel([])
+
+            TranscriptionStage(
+                repo, Path(temp_dir) / "transcripts", model_provider=FakeProvider, logger=logging.getLogger("test")
+            ).process("abc")
+
+            self.assertEqual(FakeProvider.model.calls[0]["audio"], str(video_path))
 
     def test_completed_transcription_returns_immediately(self) -> None:
         """Completed videos do not load the model again."""

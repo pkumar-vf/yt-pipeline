@@ -22,6 +22,9 @@ export MONGO_DB="yt_pipeline"
 Transcripts are written to `transcripts/<videoId>.json` and
 `transcripts/<videoId>.srt`.
 
+Downloads are split by purpose: highest-quality merged video files go to
+`downloads/video/`, and transcription audio goes to `downloads/audio/`.
+
 Vertical reel candidates are written to `reels/<videoId>/`. By default the
 pipeline creates up to 20 centered 1080x1920 clips at 30 seconds each:
 

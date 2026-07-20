@@ -165,12 +165,12 @@ class TranscriptionStage:
         download = video.stages.get(StageName.DOWNLOAD.value)
         if not download or not download.completed:
             raise ValueError("Download stage must be completed before transcription.")
-        if not video.local_path:
-            raise ValueError("Video document is missing localPath.")
+        media_path = self._transcription_media_path(video)
+        if media_path is None:
+            raise ValueError("Video document is missing audioPath and localPath.")
 
-        local_path = Path(video.local_path)
-        if not local_path.exists():
-            raise FileNotFoundError(f"Local video path does not exist: {local_path}")
+        if not media_path.exists():
+            raise FileNotFoundError(f"Transcription media path does not exist: {media_path}")
         return video
 
     def _transcribe(self, video: VideoDocument) -> TranscriptionResultDTO:
@@ -181,8 +181,9 @@ class TranscriptionStage:
         subtitle_path = self.transcripts_dir / f"{video.video_id}.srt"
 
         model = self.model_provider.get(self.model_name)
+        media_path = self._transcription_media_path(video)
         segments, info = model.transcribe(
-            video.local_path or "",
+            str(media_path),
             beam_size=5,
             word_timestamps=True,
             vad_filter=True,
@@ -210,6 +211,15 @@ class TranscriptionStage:
             total_segments=total_segments,
             model=self.model_name,
         )
+
+    def _transcription_media_path(self, video: VideoDocument) -> Path | None:
+        """Return the preferred audio path, falling back to video for older documents."""
+
+        if video.audio_path:
+            return Path(video.audio_path)
+        if video.local_path:
+            return Path(video.local_path)
+        return None
 
     def _log_progress(self, total_segments: int) -> None:
         """Log transcription progress every 100 processed segments."""
@@ -261,4 +271,3 @@ def _optional_float(value: Any) -> float | None:
     """Convert optional numeric values to floats."""
 
     return None if value is None else float(value)
-

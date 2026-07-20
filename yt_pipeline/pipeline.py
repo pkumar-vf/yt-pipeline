@@ -48,6 +48,7 @@ class VideoPipeline:
                     status=VideoStatus.DOWNLOADED,
                     path=str(downloaded.local_path),
                     local_path=str(downloaded.local_path),
+                    audio_path=str(downloaded.audio_path),
                     metadata=downloaded.metadata,
                 )
                 created += 1

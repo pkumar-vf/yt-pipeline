@@ -76,6 +76,7 @@ class VideoRepository:
         path: str | None = None,
         metadata: dict[str, Any] | None = None,
         local_path: str | None = None,
+        audio_path: str | None = None,
     ) -> None:
         """Mark a stage complete and optionally advance the video status."""
 
@@ -93,6 +94,8 @@ class VideoRepository:
             update["status"] = status.value
         if local_path:
             update["localPath"] = local_path
+        if audio_path:
+            update["audioPath"] = audio_path
         self.collection.update_one({"videoId": video_id}, {"$set": update})
 
     def complete_transcription(

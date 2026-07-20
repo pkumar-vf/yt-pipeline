@@ -9,6 +9,7 @@ import yt_dlp
 from yt_pipeline.models import DiscoveredVideoDTO, DownloadedVideoDTO
 
 BEST_AVAILABLE_FORMAT = "bv*+ba/b"
+BEST_AUDIO_FORMAT = "ba/bestaudio/b"
 
 
 class YouTubeDownloader:
@@ -30,26 +31,45 @@ class YouTubeDownloader:
         return [self._to_discovered(entry) for entry in entries if entry.get("id")]
 
     def download(self, video: DiscoveredVideoDTO) -> DownloadedVideoDTO:
-        """Download one video and return the resolved local file path."""
+        """Download highest-quality video plus a separate audio file."""
 
         self.downloads_dir.mkdir(parents=True, exist_ok=True)
-        output_template = str(self.downloads_dir / "%(id)s.%(ext)s")
-        options = {
-            "outtmpl": output_template,
+        video_dir = self.downloads_dir / "video"
+        audio_dir = self.downloads_dir / "audio"
+        video_dir.mkdir(parents=True, exist_ok=True)
+        audio_dir.mkdir(parents=True, exist_ok=True)
+
+        video_options = {
+            "outtmpl": str(video_dir / "%(id)s.%(ext)s"),
             "quiet": True,
             "format": BEST_AVAILABLE_FORMAT,
             "merge_output_format": "mp4",
         }
+        audio_options = {
+            "outtmpl": str(audio_dir / "%(id)s.%(ext)s"),
+            "quiet": True,
+            "format": BEST_AUDIO_FORMAT,
+            "postprocessors": [
+                {
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "m4a",
+                }
+            ],
+        }
 
-        with yt_dlp.YoutubeDL(options) as ydl:
+        with yt_dlp.YoutubeDL(video_options) as ydl:
             info = ydl.extract_info(video.webpage_url, download=True)
             path = self._downloaded_path(ydl, info)
+        with yt_dlp.YoutubeDL(audio_options) as ydl:
+            audio_info = ydl.extract_info(video.webpage_url, download=True)
+            audio_path = self._audio_path(ydl, audio_info)
 
         return DownloadedVideoDTO(
             video_id=video.video_id,
             title=info.get("title") or video.title,
             local_path=path,
-            metadata=self._metadata(info),
+            audio_path=audio_path,
+            metadata={**self._metadata(info), "audioPath": str(audio_path)},
         )
 
     def _downloaded_path(self, ydl: yt_dlp.YoutubeDL, info: dict[str, Any]) -> Path:
@@ -63,6 +83,15 @@ class YouTubeDownloader:
         if info.get("requested_formats") and path.suffix != ".mp4":
             return path.with_suffix(".mp4")
         return path
+
+    def _audio_path(self, ydl: yt_dlp.YoutubeDL, info: dict[str, Any]) -> Path:
+        """Return the final audio path after yt-dlp extracts audio."""
+
+        requested_downloads = info.get("requested_downloads") or []
+        if requested_downloads and requested_downloads[0].get("filepath"):
+            filepath = Path(requested_downloads[0]["filepath"])
+            return filepath if filepath.suffix == ".m4a" else filepath.with_suffix(".m4a")
+        return Path(ydl.prepare_filename(info)).with_suffix(".m4a")
 
     def _to_discovered(self, entry: dict[str, Any]) -> DiscoveredVideoDTO:
         """Map one yt-dlp channel entry into a validated DTO."""

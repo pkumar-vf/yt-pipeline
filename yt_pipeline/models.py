@@ -63,6 +63,7 @@ class VideoDocument(BaseModel):
     published_at: datetime | None = Field(default=None, alias="publishedAt")
     status: VideoStatus = VideoStatus.DISCOVERED
     local_path: str | None = Field(default=None, alias="localPath")
+    audio_path: str | None = Field(default=None, alias="audioPath")
     created_at: datetime = Field(default_factory=utc_now, alias="createdAt")
     updated_at: datetime = Field(default_factory=utc_now, alias="updatedAt")
     stages: dict[str, StageState] = Field(
@@ -103,6 +104,7 @@ class DownloadedVideoDTO(BaseModel):
     video_id: str
     title: str
     local_path: Path
+    audio_path: Path
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
